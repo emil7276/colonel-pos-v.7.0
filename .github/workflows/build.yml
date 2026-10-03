@@ -1,4 +1,4 @@
-name: CP Colonel POS 6.5
+name: CP POS V.7.0
 
 on:
   workflow_dispatch:
@@ -56,11 +56,11 @@ jobs:
         working-directory: app
         run: |
           flutter build apk --release
-          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/CP-COLONEL-POS-6.5-NEW-UI-DARK-MODE.apk
+          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/CP POS V.7.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: CP-COLONEL-POS-6.5-NEW-UI-DARK-MODE-apk
-          path: app/build/app/outputs/flutter-apk/CP-COLONEL-POS-6.5-NEW-UI-DARK-MODE.apk
+          path: app/build/app/outputs/flutter-apk/CP POS V.7.0.apk
           if-no-files-found: error

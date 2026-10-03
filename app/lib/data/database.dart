@@ -23,7 +23,7 @@ class DB {
 
     _db = await openDatabase(
       path.join(dir, 'colonel_pos_v64.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE products(
@@ -60,7 +60,11 @@ class DB {
             cash INTEGER NOT NULL,
             change_amount INTEGER NOT NULL,
             payment TEXT NOT NULL,
-            returned INTEGER NOT NULL DEFAULT 0
+            returned INTEGER NOT NULL DEFAULT 0,
+            customer_phone TEXT NOT NULL DEFAULT '',
+            transfer_bank TEXT NOT NULL DEFAULT '',
+            transfer_account TEXT NOT NULL DEFAULT '',
+            due_date TEXT NOT NULL DEFAULT ''
           )
         ''');
 
@@ -92,7 +96,9 @@ class DB {
             expense_date TEXT NOT NULL,
             category TEXT NOT NULL,
             note TEXT NOT NULL,
-            amount INTEGER NOT NULL
+            amount INTEGER NOT NULL,
+            payment_status TEXT NOT NULL DEFAULT 'Sudah Dibayar',
+            due_date TEXT NOT NULL DEFAULT ''
           )
         ''');
 
@@ -144,6 +150,14 @@ class DB {
               amount INTEGER NOT NULL
             )
           ''');
+        }
+        if (oldVersion < 4) {
+          await db.execute("ALTER TABLE sales ADD COLUMN customer_phone TEXT NOT NULL DEFAULT ''");
+          await db.execute("ALTER TABLE sales ADD COLUMN transfer_bank TEXT NOT NULL DEFAULT ''");
+          await db.execute("ALTER TABLE sales ADD COLUMN transfer_account TEXT NOT NULL DEFAULT ''");
+          await db.execute("ALTER TABLE sales ADD COLUMN due_date TEXT NOT NULL DEFAULT ''");
+          await db.execute("ALTER TABLE expenses ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'Sudah Dibayar'");
+          await db.execute("ALTER TABLE expenses ADD COLUMN due_date TEXT NOT NULL DEFAULT ''");
         }
       },
     );
@@ -310,6 +324,7 @@ class DB {
   static Future<int> createSale({
     required String cashier,
     required String customerName,
+    required String customerPhone,
     required String customerType,
     required List<CartLine> items,
     required int subtotal,
@@ -318,6 +333,9 @@ class DB {
     required int cash,
     required int change,
     required String payment,
+    String transferBank = '',
+    String transferAccount = '',
+    String dueDate = '',
   }) async {
     if (items.isEmpty) {
       throw Exception(
@@ -384,6 +402,7 @@ class DB {
           'sale_time': stamp(),
           'cashier': cashier,
           'customer_name': customerName.trim().isEmpty ? 'Pelanggan Umum' : customerName.trim(),
+          'customer_phone': customerPhone.trim(),
           'customer_type': customerType,
           'subtotal': subtotal,
           'discount': discount,
@@ -391,6 +410,9 @@ class DB {
           'cash': cash,
           'change_amount': change,
           'payment': payment,
+          'transfer_bank': transferBank.trim(),
+          'transfer_account': transferAccount.trim(),
+          'due_date': dueDate.trim(),
           'returned': 0,
         },
       );
@@ -536,6 +558,7 @@ class DB {
         WHERE sale_time >= ?
           AND sale_time < ?
           AND returned=0
+          AND payment != 'Bayar Tunda'
       )
       GROUP BY name
       ORDER BY qty DESC
@@ -562,6 +585,7 @@ class DB {
       WHERE sale_time >= ?
         AND sale_time < ?
         AND returned=0
+        AND payment != 'Bayar Tunda'
       GROUP BY jam
       ORDER BY transaksi DESC
       ''',
@@ -587,6 +611,7 @@ class DB {
       WHERE sale_time >= ?
         AND sale_time < ?
         AND returned=0
+        AND payment != 'Bayar Tunda'
       GROUP BY tanggal
       ORDER BY transaksi DESC
       ''',
@@ -614,6 +639,7 @@ class DB {
       WHERE sale_time >= ?
         AND sale_time < ?
         AND returned=0
+        AND payment != 'Bayar Tunda'
       GROUP BY customer_name, customer_type
       ORDER BY omzet DESC
       ''',
@@ -641,6 +667,7 @@ class DB {
       WHERE sale_time >= ?
         AND sale_time < ?
         AND returned=0
+        AND payment != 'Bayar Tunda'
       GROUP BY periode
       ORDER BY periode
       ''',
@@ -662,6 +689,7 @@ class DB {
       WHERE sale_time >= ?
         AND sale_time < ?
         AND returned=0
+        AND payment != 'Bayar Tunda'
       GROUP BY periode
       ORDER BY periode
       ''',
@@ -682,6 +710,7 @@ class DB {
       WHERE sale_time >= ?
         AND sale_time < ?
         AND returned=0
+        AND payment != 'Bayar Tunda'
       ''',
       [
         _dbDate(from),
@@ -765,11 +794,11 @@ class DB {
     final salesRows = await db.query('sales', where: 'sale_time >= ? AND sale_time < ?', whereArgs: [_dbDate(start), _dbDate(end)], orderBy: 'sale_time DESC');
     final valid = salesRows.where((x) => x['returned'] != 1).toList();
     final returned = salesRows.where((x) => x['returned'] == 1).toList();
-    final itemRows = await db.rawQuery('SELECT COALESCE(SUM(si.qty),0) jumlah FROM sale_items si INNER JOIN sales s ON s.id=si.sale_id WHERE s.sale_time >= ? AND s.sale_time < ? AND s.returned=0', [_dbDate(start), _dbDate(end)]);
+    final itemRows = await db.rawQuery('SELECT COALESCE(SUM(si.qty),0) jumlah FROM sale_items si INNER JOIN sales s ON s.id=si.sale_id WHERE s.sale_time >= ? AND s.sale_time < ? AND s.returned=0 AND s.payment != 'Bayar Tunda', [_dbDate(start), _dbDate(end)]);
     final payments = <String,int>{};
     for (final row in valid) { final p = row['payment']?.toString() ?? 'Lainnya'; payments[p] = (payments[p] ?? 0) + 1; }
     return {'sales': valid,
-      'returnedSales': returned, 'returned': returned.length, 'omzet': valid.fold<int>(0, (sum, x) => sum + (x['total'] as num).toInt()), 'transaksi': valid.length, 'item': (itemRows.first['jumlah'] as num).toInt(), 'payments': payments};
+      'returnedSales': returned, 'returned': returned.length, 'omzet': valid.where((x) => x['payment'] != 'Bayar Tunda').fold<int>(0, (sum, x) => sum + (x['total'] as num).toInt()), 'transaksi': valid.where((x) => x['payment'] != 'Bayar Tunda').length, 'item': (itemRows.first['jumlah'] as num).toInt(), 'payments': payments};
   }
 
 
@@ -802,12 +831,20 @@ class DB {
     return (rows.first['total'] as num).toInt();
   }
 
+  static Future<int> expenseDebtTotal(DateTime from, DateTime to) async {
+    final db = await database;
+    final rows = await db.rawQuery("SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE expense_date >= ? AND expense_date < ? AND payment_status='Jatuh Tempo'", [_dbDate(from), _dbDate(to)]);
+    return (rows.first['total'] as num).toInt();
+  }
+
   static Future<void> saveExpense({
     int? id,
     required DateTime date,
     required String category,
     required String note,
     required int amount,
+    String paymentStatus = 'Sudah Dibayar',
+    DateTime? dueDate,
   }) async {
     if (category.trim().isEmpty) {
       throw Exception('Kategori wajib diisi.');
@@ -826,6 +863,8 @@ class DB {
       'category': category.trim(),
       'note': note.trim(),
       'amount': amount,
+      'payment_status': paymentStatus,
+      'due_date': paymentStatus == 'Jatuh Tempo' && dueDate != null ? _dbDate(dueDate) : '',
     };
 
     if (id == null) {
@@ -853,7 +892,7 @@ class DB {
     final db = await database;
 
     return {
-      'version': '6.5.0',
+      'version': '7.0.0',
       'created': stamp(),
       'products': await db.query('products'),
       'users': await db.query('users'),

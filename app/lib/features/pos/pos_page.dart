@@ -33,12 +33,16 @@ class PosPageState extends State<PosPage> {
   int discount = 0;
   String customerType = 'Retail';
   final TextEditingController customerNameController = TextEditingController();
+  final TextEditingController customerPhoneController = TextEditingController();
+  final TextEditingController menuSearchController = TextEditingController();
+  String menuSearch = '';
 
-  @override
   @override
   void dispose() {
     _successPlayer.dispose();
     customerNameController.dispose();
+    customerPhoneController.dispose();
+    menuSearchController.dispose();
     super.dispose();
   }
 
@@ -214,6 +218,13 @@ class PosPageState extends State<PosPage> {
     }
   }
 
+  Future<void> customerDialog() async {
+    final n=TextEditingController(text:customerNameController.text);
+    final p=TextEditingController(text:customerPhoneController.text);
+    final ok=await showDialog<bool>(context:context,builder:(_)=>AlertDialog(title:const Text('Data Pelanggan'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:n,decoration:const InputDecoration(labelText:'Nama Pelanggan')),TextField(controller:p,keyboardType:TextInputType.phone,decoration:const InputDecoration(labelText:'Nomor HP'))]),actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Batal')),FilledButton(onPressed:(){customerNameController.text=n.text.trim();customerPhoneController.text=p.text.trim();Navigator.pop(context,true);},child:const Text('Simpan'))]));
+    n.dispose();p.dispose();if(ok==true&&mounted)setState((){});
+  }
+
   Future<void> payment() async {
     if (cart.isEmpty) return;
 
@@ -221,6 +232,9 @@ class PosPageState extends State<PosPage> {
         TextEditingController();
 
     String method = 'Tunai';
+    final bankController=TextEditingController();
+    final accountController=TextEditingController();
+    DateTime? dueDate;
 
     final result =
         await showDialog<
@@ -271,9 +285,8 @@ class PosPageState extends State<PosPage> {
                       children: [
                         for (final x in const [
                           'Tunai',
-                          'QRIS',
                           'Transfer',
-                          'Wallet (Platform)',
+                          'Bayar Tunda',
                         ])
                           ChoiceChip(
                             label: Text(x),
@@ -293,6 +306,15 @@ class PosPageState extends State<PosPage> {
                       ],
                     ),
                   ),
+                  if (method == 'Transfer') ...[
+                    const SizedBox(height:10),
+                    TextField(controller:bankController,decoration:const InputDecoration(labelText:'Nama Bank *')),
+                    TextField(controller:accountController,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Nomor Rekening (opsional)')),
+                  ],
+                  if (method == 'Bayar Tunda') ...[
+                    const SizedBox(height:10),
+                    ListTile(contentPadding:EdgeInsets.zero,title:const Text('Tanggal Jatuh Tempo'),subtitle:Text(dueDate==null?'Pilih tanggal':displayDate(dueDate!)),onTap:()async{final d=await showDatePicker(context:context,initialDate:DateTime.now(),firstDate:DateTime.now(),lastDate:DateTime(2100));if(d!=null)setDialog(()=>dueDate=d);}),
+                  ],
                   if (method ==
                       'Tunai') ...[
                     const SizedBox(
@@ -361,22 +383,9 @@ class PosPageState extends State<PosPage> {
                       return;
                     }
 
-                    Navigator.pop(
-                      context,
-                      {
-                        'method': method,
-                        'cash':
-                            method ==
-                                    'Tunai'
-                                ? c
-                                : total,
-                        'change':
-                            method ==
-                                    'Tunai'
-                                ? c - total
-                                : 0,
-                      },
-                    );
+                    if (method == 'Transfer' && bankController.text.trim().isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Nama bank wajib diisi.'))); return; }
+                    if (method == 'Bayar Tunda' && dueDate == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Tanggal jatuh tempo wajib dipilih.'))); return; }
+                    Navigator.pop(context,{'method':method,'cash':method=='Tunai'?c:0,'change':method=='Tunai'?c-total:0,'bank':bankController.text.trim(),'account':accountController.text.trim(),'dueDate':dueDate});
                   },
                   child:
                       const Text('PROSES'),
@@ -394,6 +403,7 @@ class PosPageState extends State<PosPage> {
       final id = await DB.createSale(
         cashier: widget.cashier,
         customerName: customerNameController.text,
+        customerPhone: customerPhoneController.text,
         customerType: customerType,
         items: cart,
         subtotal: subtotal,
@@ -403,8 +413,10 @@ class PosPageState extends State<PosPage> {
             result['cash'] as int,
         change:
             result['change'] as int,
-        payment:
-            result['method'] as String,
+        payment: result['method'] as String,
+        transferBank: result['bank'] as String? ?? '',
+        transferAccount: result['account'] as String? ?? '',
+        dueDate: result['dueDate'] is DateTime ? (result['dueDate'] as DateTime).toIso8601String() : '',
       );
 
       // Transaksi sudah berhasil tersimpan.
@@ -443,6 +455,7 @@ class PosPageState extends State<PosPage> {
         cart.clear();
         discount = 0;
         customerNameController.clear();
+        customerPhoneController.clear();
         customerType = 'Retail';
       });
 
@@ -603,9 +616,9 @@ class PosPageState extends State<PosPage> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final accentSoft = AppColors.red.withValues(alpha: .12);
-    final filtered = category == 'Semua'
-        ? products
-        : products.where((p) => p.category == category).toList();
+    final baseFiltered = category == 'Semua' ? products : products.where((p) => p.category == category).toList();
+    final q = menuSearch.trim().toLowerCase();
+    final filtered = q.isEmpty ? baseFiltered : baseFiltered.where((p) => p.name.toLowerCase().contains(q) || p.category.toLowerCase().contains(q)).toList();
 
     return LayoutBuilder(
       builder: (context, c) {
@@ -618,10 +631,11 @@ class PosPageState extends State<PosPage> {
               padding: const EdgeInsets.fromLTRB(4, 2, 4, 7),
               child: Row(
                 children: [
-                  const Expanded(
-                    child: Text(
-                      'Transaksi',
-                      style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+                  Expanded(
+                    child: TextField(
+                      controller: menuSearchController,
+                      onChanged: (v) => setState(() => menuSearch = v),
+                      decoration: const InputDecoration(prefixIcon: Icon(Icons.search_rounded), hintText: 'Cari menu...', isDense: true, border: OutlineInputBorder()),
                     ),
                   ),
                   OutlinedButton.icon(
@@ -776,8 +790,9 @@ class PosPageState extends State<PosPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    TextField(
-                      controller: customerNameController,
+                    CheckboxListTile(contentPadding: EdgeInsets.zero,value: customerNameController.text.trim().isNotEmpty || customerPhoneController.text.trim().isNotEmpty,title: const Text('Data Pelanggan'),subtitle: const Text('Nama dan nomor HP'),onChanged: (_) => customerDialog()),
+              TextField(
+                controller: customerNameController,
                       textInputAction: TextInputAction.done,
                       decoration: InputDecoration(
                         labelText: 'Nama Pelanggan',

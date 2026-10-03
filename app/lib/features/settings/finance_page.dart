@@ -16,6 +16,7 @@ class _FinancePageState extends State<FinancePage> {
 
   int income = 0;
   int expense = 0;
+  int debt = 0;
   List<Map<String, dynamic>> expenseRows = [];
 
   @override
@@ -52,6 +53,7 @@ class _FinancePageState extends State<FinancePage> {
     final results = await Future.wait([
       DB.omzet(from, to),
       DB.expenseTotal(from, to),
+      DB.expenseDebtTotal(from, to),
       DB.expenses(from, to),
     ]);
 
@@ -60,8 +62,8 @@ class _FinancePageState extends State<FinancePage> {
     setState(() {
       income = results[0] as int;
       expense = results[1] as int;
-      expenseRows =
-          results[2] as List<Map<String, dynamic>>;
+      debt = results[2] as int;
+      expenseRows = results[3] as List<Map<String, dynamic>>;
     });
   }
 
@@ -105,9 +107,8 @@ class _FinancePageState extends State<FinancePage> {
     final note = TextEditingController(
       text: item?['note']?.toString() ?? '',
     );
-    final amount = TextEditingController(
-      text: item?['amount']?.toString() ?? '',
-    );
+    final amount = TextEditingController(text: item?['amount']?.toString() ?? '');
+    String paymentStatus = item?['payment_status']?.toString() ?? 'Sudah Dibayar';
 
     DateTime date = item == null
         ? DateTime.now()
@@ -152,6 +153,7 @@ class _FinancePageState extends State<FinancePage> {
                         prefixText: 'Rp ',
                       ),
                     ),
+                    DropdownButtonFormField<String>(value:paymentStatus,decoration:const InputDecoration(labelText:'Status Pembayaran'),items:const [DropdownMenuItem(value:'Sudah Dibayar',child:Text('Sudah Dibayar')),DropdownMenuItem(value:'Jatuh Tempo',child:Text('Jatuh Tempo'))],onChanged:(v){if(v!=null)setDialogState(()=>paymentStatus=v);}),
                     const SizedBox(height: 8),
                     ListTile(
                       contentPadding: EdgeInsets.zero,
@@ -198,6 +200,8 @@ class _FinancePageState extends State<FinancePage> {
                         category: category.text,
                         note: note.text,
                         amount: nominal ?? 0,
+                        paymentStatus: paymentStatus,
+                        dueDate: paymentStatus == 'Jatuh Tempo' ? date : null,
                       );
 
                       if (dialogContext.mounted) {
@@ -306,7 +310,7 @@ class _FinancePageState extends State<FinancePage> {
 
   @override
   Widget build(BuildContext context) {
-    final net = income - expense;
+    final net = income - (expense - debt);
 
     return Scaffold(
       appBar: AppBar(

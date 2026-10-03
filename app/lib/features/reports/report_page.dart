@@ -14,6 +14,7 @@ class ReportPage extends StatefulWidget {
 
 class _ReportPageState extends State<ReportPage> {
   DateTime selectedDate = DateTime.now();
+  DateTime? selectedEndDate;
   bool loading = true;
   int omzet = 0, transaksi = 0, item = 0, retur = 0;
   Map<String,int> payments = {};
@@ -25,7 +26,7 @@ class _ReportPageState extends State<ReportPage> {
   String trendMode = 'Hari';
 
   DateTime get start => DateTime(selectedDate.year, selectedDate.month, selectedDate.day);
-  DateTime get end => start.add(const Duration(days: 1));
+  DateTime get end => selectedEndDate == null ? start.add(const Duration(days: 1)) : DateTime(selectedEndDate!.year,selectedEndDate!.month,selectedEndDate!.day).add(const Duration(days:1));
 
   Future<void> load() async {
     setState(() => loading = true);
@@ -55,13 +56,13 @@ class _ReportPageState extends State<ReportPage> {
   @override void initState(){ super.initState(); load(); }
 
   Future<void> pickDate() async {
-    final d=await showDatePicker(context:context,initialDate:selectedDate,firstDate:DateTime(2020),lastDate:DateTime.now());
-    if(d!=null){setState(()=>selectedDate=d); await load();}
+    final r=await showDateRangePicker(context:context,firstDate:DateTime(2020),lastDate:DateTime.now(),initialDateRange:DateTimeRange(start:selectedDate,end:selectedEndDate??selectedDate));
+    if(r!=null){setState((){selectedDate=r.start;selectedEndDate=r.end;});await load();}
   }
 
   @override Widget build(BuildContext context){
     return RefreshIndicator(onRefresh:load,child:ListView(padding:const EdgeInsets.fromLTRB(16,16,16,28),children:[
-      Row(children:[Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Laporan Harian',style:TextStyle(fontSize:23,fontWeight:FontWeight.w900)),Text(displayDate(selectedDate),style:TextStyle(color:Theme.of(context).colorScheme.onSurfaceVariant))])),OutlinedButton.icon(onPressed:pickDate,icon:const Icon(Icons.calendar_month_outlined),label:const Text('Pilih tanggal'))]),
+      Row(children:[Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Laporan',style:TextStyle(fontSize:23,fontWeight:FontWeight.w900)),Text('${displayDate(start)} - ${displayDate(end.subtract(const Duration(days:1)))}',style:TextStyle(color:Theme.of(context).colorScheme.onSurfaceVariant))])),OutlinedButton.icon(onPressed:pickDate,icon:const Icon(Icons.calendar_month_outlined),label:const Text('Pilih rentang tanggal'))]),
       const SizedBox(height:16),
       if(loading) const LinearProgressIndicator(minHeight:3),
       const SizedBox(height:8),
