@@ -794,7 +794,10 @@ class DB {
     final salesRows = await db.query('sales', where: 'sale_time >= ? AND sale_time < ?', whereArgs: [_dbDate(start), _dbDate(end)], orderBy: 'sale_time DESC');
     final valid = salesRows.where((x) => x['returned'] != 1).toList();
     final returned = salesRows.where((x) => x['returned'] == 1).toList();
-    final itemRows = await db.rawQuery('SELECT COALESCE(SUM(si.qty),0) jumlah FROM sale_items si INNER JOIN sales s ON s.id=si.sale_id WHERE s.sale_time >= ? AND s.sale_time < ? AND s.returned=0 AND s.payment != 'Bayar Tunda', [_dbDate(start), _dbDate(end)]);
+    final itemRows = await db.rawQuery(
+      "SELECT COALESCE(SUM(si.qty),0) jumlah FROM sale_items si INNER JOIN sales s ON s.id=si.sale_id WHERE s.sale_time >= ? AND s.sale_time < ? AND s.returned=0 AND s.payment != 'Bayar Tunda'",
+      [_dbDate(start), _dbDate(end)],
+    );
     final payments = <String,int>{};
     for (final row in valid) { final p = row['payment']?.toString() ?? 'Lainnya'; payments[p] = (payments[p] ?? 0) + 1; }
     return {'sales': valid,
